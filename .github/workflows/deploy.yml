@@ -1,0 +1,109 @@
+name: Pipeline de Deploy Multi-Ambiente
+run-name: Deploy em andamento para ${{ github.ref_name }} (Disparado por ${{ github.event_name }})
+
+# --- GATILHOS (TRIGGERS) ---
+on:
+  # 1. master/main: Sempre que houver push ou PR merged (target branch é main/master)
+  push:
+    branches:
+      - main
+      - master
+  
+  # 2. preprod: Agendado (diariamente às 10:00 UTC, equivalente a 07:00 BRT)
+  #    O 'schedule' geralmente executa na branch default (main/master).
+  #    Usaremos um passo condicional para tratar isto como deploy do preprod.
+  schedule:
+    # Escolhemos um horário específico todos os dias (10:00 UTC)
+    - cron: '0 10 * * *' 
+  
+  # 3. preprod e dev: Disparo manual (Apenas com workflow_dispatch)
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Selecione o ambiente para deploy manual (preprod ou dev)'
+        required: true
+        type: choice
+        options:
+          - preprod
+          - dev
+
+# --- VARIÁVEIS DE AMBIENTE (Configuradas em Secrets) ---
+# Você deve configurar estes secrets no seu repositório GitHub
+# - PROD_DB_URL, PREPROD_DB_URL, DEV_DB_URL
+# - PROD_DEPLOY_HOOK, PREPROD_DEPLOY_HOOK, DEV_DEPLOY_HOOK
+# Exemplo: https://docs.netlify.com/configure-builds/build-hooks/
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    # Define o ambiente alvo baseado no gatilho/branch
+    steps:
+      - name: 🔍 Definir Variáveis de Ambiente e Branch Alvo
+        id: set_env
+        run: |
+          # 1. Triggers 'push' (master/main)
+          if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
+            echo "TARGET_ENV=prod" >> $GITHUB_ENV
+            echo "DB_URL=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV
+            echo "DEPLOY_HOOK=${{ secrets.PROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
+            echo "TARGET_BRANCH=main" >> $GITHUB_ENV
+            echo "Deploy acionado por PUSH na branch main/master."
+
+          # 2. Trigger 'schedule' (preprod)
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            echo "TARGET_ENV=preprod" >> $GITHUB_ENV
+            echo "DB_URL=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
+            echo "DEPLOY_HOOK=${{ secrets.PREPROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
+            echo "TARGET_BRANCH=preprod" >> $GITHUB_ENV
+            echo "Deploy agendado para PREPROD."
+
+          # 3. Trigger 'workflow_dispatch' (manual - preprod ou dev)
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ENV_CHOICE="${{ github.event.inputs.target_environment }}"
+            echo "TARGET_ENV=$ENV_CHOICE" >> $GITHUB_ENV
+            echo "TARGET_BRANCH=$ENV_CHOICE" >> $GITHUB_ENV
+            
+            if [[ "$ENV_CHOICE" == "preprod" ]]; then
+              echo "DB_URL=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
+              echo "DEPLOY_HOOK=${{ secrets.PREPROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
+              echo "Deploy manual para PREPROD."
+            elif [[ "$ENV_CHOICE" == "dev" ]]; then
+              echo "DB_URL=${{ secrets.DEV_DB_URL }}" >> $GITHUB_ENV
+              echo "DEPLOY_HOOK=${{ secrets.DEV_DEPLOY_HOOK }}" >> $GITHUB_ENV
+              echo "Deploy manual para DEV."
+            fi
+          
+          # 4. Falha se não for um trigger válido para deploy
+          else
+            echo "Skipping deploy as branch ${{ github.ref_name }} is not a deployment branch or trigger is invalid."
+            exit 0 # Sai do job se não houver ambiente alvo
+          fi
+          
+      - name: ⚙️ Checkout do Código (Branch Alvo)
+        uses: actions/checkout@v4
+        # Garante que o checkout é feito na branch correta, especialmente para schedule
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+
+      - name: 🚀 Deploy do Frontend (Página HTML)
+        # Este passo usa o Hook de Deploy do Vercel/Netlify/etc. para acionar o build
+        run: |
+          echo "Disparando deploy do Frontend para o ambiente ${{ env.TARGET_ENV }}..."
+          curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
+          echo "Hook de Deploy enviado. Verifique o status no serviço de hospedagem."
+
+      - name: 💾 Instalar Cliente PostgreSQL
+        # Usaremos um cliente simples para executar o script de migração.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          
+      - name: 🔄 Executar Migrações do Banco de Dados
+        # Adicione o script SQL no caminho 'migrations/01_initial_setup.sql' no seu repo.
+        run: |
+          echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
+          # O arquivo '01_initial_setup.sql' deve estar na raiz do seu repositório.
+          # Conecta-se ao banco de dados usando a variável de ambiente DB_URL
+          psql "${{ env.DB_URL }}" -f migrations/01_initial_setup.sql -v ON_ERROR_STOP=1
+          echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
