@@ -80,7 +80,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client dnsutils
 
-      - name: 🔴 AUTO-CORREÇÃO: Resolver IPv4 e Substituir Host
+      - name: 'AUTO-CORREÇÃO: Resolver IPv4 e Substituir Host'
+        
         id: resolve_ip
         run: |
           # 1. Tenta resolver o IPv4 para o hostname do Supabase
