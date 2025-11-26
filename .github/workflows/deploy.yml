@@ -32,13 +32,14 @@ jobs:
       - name: 🔍 Definir Variáveis de Ambiente e Branch Alvo
         id: set_env
         run: |
-          # Define o hostname do Supabase para correção de IPv4 (SEU HOSTNAME AQUI)
+          # 🟢 FORÇA O IP LITERAL DO SUPABASE (Substitui a resolução DNS)
+          echo "HOST_SUPABASE_IP=104.18.23.1" >> $GITHUB_ENV 
           echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
           
           # 1. Triggers 'push' (master/main)
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_ENV
-            echo "DB_URL_SECRET=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV # Variável do Secret (sem correção)
+            echo "DB_URL_SECRET=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV 
             echo "DEPLOY_HOOK=${{ secrets.PROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=main" >> $GITHUB_ENV
 
@@ -74,36 +75,21 @@ jobs:
         with:
           ref: ${{ env.TARGET_BRANCH }}
 
-      - name: 💾 Instalar Ferramentas de BD e DNS
+      - name: 💾 Instalar Cliente PostgreSQL
         run: |
-          # Instala cliente PostgreSQL (psql) e ferramenta de DNS (dig)
           sudo apt-get update
-          sudo apt-get install -y postgresql-client dnsutils
+          sudo apt-get install -y postgresql-client
 
-      - name: 'AUTO-CORREÇÃO: Resolver IPv4 e Substituir Host'
-        
-        id: resolve_ip
+      - name: PREPARACAO Substituir Hostname por IP Literal
+        id: prepare_url
         run: |
-          # 1. Tenta resolver o IPv4 para o hostname do Supabase
-          echo "Tentando resolver o IPv4 para $HOST_SUPABASE..."
-          # Filtra a resposta do dig para obter APENAS o endereço IPv4 (Tipo A)
-          IPV4_ADDRESS=$(dig +short A $HOST_SUPABASE | grep -E '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' | head -n 1)
+          # 1. Usa SED para substituir o hostname pelo IP Literal (HOST_SUPABASE_IP)
+          CORRECTED_DB_URL=$(echo "$DB_URL_SECRET" | sed "s|$HOST_SUPABASE|$HOST_SUPABASE_IP|")
           
-          if [ -z "$IPV4_ADDRESS" ]; then
-            echo "❌ ERRO CRÍTICO: Não foi possível resolver o IPv4. Falha na solução automática."
-            exit 1 # Falha o job se não encontrar IPv4
-          fi
-          
-          echo "✅ IPv4 Resolvido: $IPV4_ADDRESS"
-          
-          # 2. Usa SED para substituir o hostname pelo IP Literal na URL do Secret
-          CORRECTED_DB_URL=$(echo "$DB_URL_SECRET" | sed "s|$HOST_SUPABASE|$IPV4_ADDRESS|")
-          
-          echo "✅ URL Corrigida gerada."
-          echo "CORRECTED_DB_URL=$CORRECTED_DB_URL" >> $GITHUB_ENV # Salva a string FINAL para o próximo passo
+          echo "✅ URL Corrigida gerada, IP Literal inserido."
+          echo "CORRECTED_DB_URL=$CORRECTED_DB_URL" >> $GITHUB_ENV # Salva a string FINAL
 
       - name: 🚀 Deploy do Frontend (Página HTML)
-        # Dispara o Netlify Build Hook
         run: |
           echo "Disparando deploy do Frontend para o ambiente ${{ env.TARGET_ENV }}..."
           curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
