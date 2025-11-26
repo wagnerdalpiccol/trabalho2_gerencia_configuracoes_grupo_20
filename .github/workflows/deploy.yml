@@ -3,12 +3,17 @@ run-name: Deploy em andamento para ${{ github.ref_name }} (Disparado por ${{ git
 
 # --- GATILHOS (TRIGGERS) ---
 on:
+  # 1. master/main: Sempre que houver push ou PR merged
   push:
     branches:
       - main
       - master
+
+  # 2. preprod: Agendado (diariamente às 10:00 UTC)
   schedule:
     - cron: '0 10 * * *'
+
+  # 3. preprod e dev: Disparo manual
   workflow_dispatch:
     inputs:
       target_environment:
@@ -19,8 +24,6 @@ on:
           - preprod
           - dev
 
-# --- VARIÁVEIS DE AMBIENTE (Configuradas em Secrets) ---
-# Use o hostname e a senha escapada nos Secrets!
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -29,24 +32,28 @@ jobs:
       - name: 🔍 Definir Variáveis de Ambiente e Branch Alvo
         id: set_env
         run: |
-          # (Lógica de IF/ELIF/ELSE para definir TARGET_ENV, DB_URL e DEPLOY_HOOK - SEM ALTERAÇÃO)
+          # Define o hostname do Supabase para correção de IPv4 (SEU HOSTNAME AQUI)
+          echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
+          
+          # 1. Triggers 'push' (master/main)
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_ENV
-            echo "DB_URL_SECRET=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV # NOME RENOMEADO
+            echo "DB_URL_SECRET=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV # Variável do Secret (sem correção)
             echo "DEPLOY_HOOK=${{ secrets.PROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=main" >> $GITHUB_ENV
-            echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV # Salva o hostname
+
+          # 2. Trigger 'schedule' (preprod)
           elif [[ "${{ github.event_name }}" == "schedule" ]]; then
             echo "TARGET_ENV=preprod" >> $GITHUB_ENV
             echo "DB_URL_SECRET=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
             echo "DEPLOY_HOOK=${{ secrets.PREPROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=preprod" >> $GITHUB_ENV
-            echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
+
+          # 3. Trigger 'workflow_dispatch' (manual - preprod ou dev)
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             ENV_CHOICE="${{ github.event.inputs.target_environment }}"
             echo "TARGET_ENV=$ENV_CHOICE" >> $GITHUB_ENV
             echo "TARGET_BRANCH=$ENV_CHOICE" >> $GITHUB_ENV
-            echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
           
             if [[ "$ENV_CHOICE" == "preprod" ]]; then
               echo "DB_URL_SECRET=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
@@ -55,6 +62,8 @@ jobs:
               echo "DB_URL_SECRET=${{ secrets.DEV_DB_URL }}" >> $GITHUB_ENV
               echo "DEPLOY_HOOK=${{ secrets.DEV_DEPLOY_HOOK }}" >> $GITHUB_ENV
             fi
+          
+          # 4. Falha se não for um trigger válido para deploy
           else
             echo "Skipping deploy..."
             exit 0
@@ -67,6 +76,7 @@ jobs:
 
       - name: 💾 Instalar Ferramentas de BD e DNS
         run: |
+          # Instala cliente PostgreSQL (psql) e ferramenta de DNS (dig)
           sudo apt-get update
           sudo apt-get install -y postgresql-client dnsutils
 
@@ -80,20 +90,19 @@ jobs:
           
           if [ -z "$IPV4_ADDRESS" ]; then
             echo "❌ ERRO CRÍTICO: Não foi possível resolver o IPv4. Falha na solução automática."
-            exit 1
+            exit 1 # Falha o job se não encontrar IPv4
           fi
           
           echo "✅ IPv4 Resolvido: $IPV4_ADDRESS"
           
-          # 2. Usa SED para substituir o hostname pela variável de IP Literal
-          # O comando SED faz o trabalho de corrigir a string de conexão
-          # Substitui 'db.furkyzfwvzptwtbkoacl.supabase.co' pelo IP resolvido
+          # 2. Usa SED para substituir o hostname pelo IP Literal na URL do Secret
           CORRECTED_DB_URL=$(echo "$DB_URL_SECRET" | sed "s|$HOST_SUPABASE|$IPV4_ADDRESS|")
           
           echo "✅ URL Corrigida gerada."
           echo "CORRECTED_DB_URL=$CORRECTED_DB_URL" >> $GITHUB_ENV # Salva a string FINAL para o próximo passo
 
       - name: 🚀 Deploy do Frontend (Página HTML)
+        # Dispara o Netlify Build Hook
         run: |
           echo "Disparando deploy do Frontend para o ambiente ${{ env.TARGET_ENV }}..."
           curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
@@ -103,19 +112,7 @@ jobs:
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
-          # A variável 'CORRECTED_DB_URL' contém o IP literal e a senha escapada
-          # Não usamos mais ${{ env.DB_URL_SECRET }}
+          # Usa a URL corrigida com o IP Literal para evitar problemas de IPv6/DNS
           psql "$CORRECTED_DB_URL" -f migrations/01_initial_setup.sql -v ON_ERROR_STOP=1
           
           echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
-  ```eof
-  
-  ### Ações Finais para o Sucesso
-  
-  1.  **Copie este novo `deploy.yml`** e substitua o arquivo atual.
-2.  **Verifique os Secrets:** Garanta que seus Secrets (`PROD_DB_URL`, etc.) contenham a URL original do Supabase com a **senha escapada**:
-    * **`PROD_DB_URL`:** `postgresql://postgres:r%246T8%23fk97f2@db.furkyzfwvzptwtbkoacl.supabase.co:5432/postgres?sslmode=require`
-  3.  Faça *commit* e *push* do novo `deploy.yml`.
-  4.  Vá para a aba **Actions** e **Re-run jobs**.
-  
-  Se a resolução DNS do IPv4 for bem-sucedida dentro do ambiente do GitHub, a migração **DEVE** passar agora. Me diga o resultado!
