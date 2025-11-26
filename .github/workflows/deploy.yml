@@ -3,12 +3,17 @@ run-name: Deploy em andamento para ${{ github.ref_name }} (Disparado por ${{ git
 
 # --- GATILHOS (TRIGGERS) ---
 on:
+  # 1. master/main: Sempre que houver push ou PR merged
   push:
     branches:
       - main
       - master
+
+  # 2. preprod: Agendado (diariamente às 10:00 UTC)
   schedule:
     - cron: '0 10 * * *'
+
+  # 3. preprod e dev: Disparo manual
   workflow_dispatch:
     inputs:
       target_environment:
@@ -77,11 +82,25 @@ jobs:
           curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
           echo "Hook de Deploy enviado. Verifique o status no Netlify."
 
-      - name: 🔄 Executar Migrações do Banco de Dados
+      - name: 🔄 Executar Migrações do Banco de Dados (Flyway Style)
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
-          # Usa a URL do Secret (agora contendo o Pooler)
-          psql "${{ env.DB_URL }}" -f migrations/01_initial_setup.sql -v ON_ERROR_STOP=1
+          MIGRATION_DIR="grupo20/src/main/resources/db/migration"
           
-          echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
+          # Garante que a pasta existe antes de tentar o loop
+          if [ -d "$MIGRATION_DIR" ]; then
+            echo "Encontrando scripts SQL em $MIGRATION_DIR..."
+          
+            # Loop que encontra todos os arquivos *.sql e os executa em ordem alfabética (V1, V2, V3...)
+            find "$MIGRATION_DIR" -type f -name "*.sql" | sort | while read -r SQL_FILE; do
+              echo "-> Executando migração: $SQL_FILE"
+              # O comando psql executa o arquivo e interrompe em caso de erro (-v ON_ERROR_STOP=1)
+              psql "${{ env.DB_URL }}" -f "$SQL_FILE" -v ON_ERROR_STOP=1
+            done
+          
+            echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
+          else
+            echo "❌ ERRO: Diretório de migração $MIGRATION_DIR não encontrado."
+            exit 1
+          fi
