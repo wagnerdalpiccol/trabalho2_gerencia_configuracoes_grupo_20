@@ -35,7 +35,7 @@ jobs:
           # 1. Triggers 'push' (master/main)
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_ENV
-            echo "DB_URL=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV # AGORA CONTÉM A URL DO POOLER
+            echo "DB_URL=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV
             echo "DEPLOY_HOOK=${{ secrets.PROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=main" >> $GITHUB_ENV
 
@@ -82,20 +82,28 @@ jobs:
           curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
           echo "Hook de Deploy enviado. Verifique o status no Netlify."
 
-      - name: 🔄 Executar Migrações do Banco de Dados (Flyway Style)
+      - name: 🗑️ CLEANUP Limpar Tabelas Antigas (Apenas DEV)
+        # ESTE PASSO SÓ RODA SE O TARGET_ENV FOR 'dev'
+        if: ${{ env.TARGET_ENV == 'dev' }}
+        run: |
+          echo "Limpando o ambiente DEV antes da migração..."
+          # psql executa o script que contém o DROP TABLE IF EXISTS clientes CASCADE
+          psql "${{ env.DB_URL }}" -f setup/clean_dev_db.sql -v ON_ERROR_STOP=1
+          echo "Limpeza concluída."
+
+      - name: 🔄 Executar Migrações do Banco de Dados
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
           MIGRATION_DIR="grupo20/src/main/resources/db/migration"
           
-          # Garante que a pasta existe antes de tentar o loop
           if [ -d "$MIGRATION_DIR" ]; then
             echo "Encontrando scripts SQL em $MIGRATION_DIR..."
           
-            # Loop que encontra todos os arquivos *.sql e os executa em ordem alfabética (V1, V2, V3...)
+            # Loop que encontra todos os arquivos *.sql e os executa em ordem alfabética
             find "$MIGRATION_DIR" -type f -name "*.sql" | sort | while read -r SQL_FILE; do
               echo "-> Executando migração: $SQL_FILE"
-              # O comando psql executa o arquivo e interrompe em caso de erro (-v ON_ERROR_STOP=1)
+              # psql executa o arquivo
               psql "${{ env.DB_URL }}" -f "$SQL_FILE" -v ON_ERROR_STOP=1
             done
           
