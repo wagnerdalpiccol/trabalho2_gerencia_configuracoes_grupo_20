@@ -3,17 +3,12 @@ run-name: Deploy em andamento para ${{ github.ref_name }} (Disparado por ${{ git
 
 # --- GATILHOS (TRIGGERS) ---
 on:
-  # 1. master/main: Sempre que houver push ou PR merged
   push:
     branches:
       - main
       - master
-
-  # 2. preprod: Agendado (diariamente às 10:00 UTC)
   schedule:
     - cron: '0 10 * * *'
-
-  # 3. preprod e dev: Disparo manual
   workflow_dispatch:
     inputs:
       target_environment:
@@ -32,21 +27,17 @@ jobs:
       - name: 🔍 Definir Variáveis de Ambiente e Branch Alvo
         id: set_env
         run: |
-          # 🟢 FORÇA O IP LITERAL DO SUPABASE (Substitui a resolução DNS)
-          echo "HOST_SUPABASE_IP=104.18.23.1" >> $GITHUB_ENV 
-          echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
-          
           # 1. Triggers 'push' (master/main)
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_ENV
-            echo "DB_URL_SECRET=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV 
+            echo "DB_URL=${{ secrets.PROD_DB_URL }}" >> $GITHUB_ENV # AGORA CONTÉM A URL DO POOLER
             echo "DEPLOY_HOOK=${{ secrets.PROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=main" >> $GITHUB_ENV
 
           # 2. Trigger 'schedule' (preprod)
           elif [[ "${{ github.event_name }}" == "schedule" ]]; then
             echo "TARGET_ENV=preprod" >> $GITHUB_ENV
-            echo "DB_URL_SECRET=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
+            echo "DB_URL=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
             echo "DEPLOY_HOOK=${{ secrets.PREPROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             echo "TARGET_BRANCH=preprod" >> $GITHUB_ENV
 
@@ -57,10 +48,10 @@ jobs:
             echo "TARGET_BRANCH=$ENV_CHOICE" >> $GITHUB_ENV
           
             if [[ "$ENV_CHOICE" == "preprod" ]]; then
-              echo "DB_URL_SECRET=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
+              echo "DB_URL=${{ secrets.PREPROD_DB_URL }}" >> $GITHUB_ENV
               echo "DEPLOY_HOOK=${{ secrets.PREPROD_DEPLOY_HOOK }}" >> $GITHUB_ENV
             elif [[ "$ENV_CHOICE" == "dev" ]]; then
-              echo "DB_URL_SECRET=${{ secrets.DEV_DB_URL }}" >> $GITHUB_ENV
+              echo "DB_URL=${{ secrets.DEV_DB_URL }}" >> $GITHUB_ENV
               echo "DEPLOY_HOOK=${{ secrets.DEV_DEPLOY_HOOK }}" >> $GITHUB_ENV
             fi
           
@@ -80,15 +71,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y postgresql-client
 
-      - name: PREPARACAO Substituir Hostname por IP Literal
-        id: prepare_url
-        run: |
-          # 1. Usa SED para substituir o hostname pelo IP Literal (HOST_SUPABASE_IP)
-          CORRECTED_DB_URL=$(echo "$DB_URL_SECRET" | sed "s|$HOST_SUPABASE|$HOST_SUPABASE_IP|")
-          
-          echo "✅ URL Corrigida gerada, IP Literal inserido."
-          echo "CORRECTED_DB_URL=$CORRECTED_DB_URL" >> $GITHUB_ENV # Salva a string FINAL
-
       - name: 🚀 Deploy do Frontend (Página HTML)
         run: |
           echo "Disparando deploy do Frontend para o ambiente ${{ env.TARGET_ENV }}..."
@@ -99,7 +81,7 @@ jobs:
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
-          # Usa a URL corrigida com o IP Literal para evitar problemas de IPv6/DNS
-          psql "$CORRECTED_DB_URL" -f migrations/01_initial_setup.sql -v ON_ERROR_STOP=1
+          # Usa a URL do Secret (agora contendo o Pooler)
+          psql "${{ env.DB_URL }}" -f migrations/01_initial_setup.sql -v ON_ERROR_STOP=1
           
           echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
