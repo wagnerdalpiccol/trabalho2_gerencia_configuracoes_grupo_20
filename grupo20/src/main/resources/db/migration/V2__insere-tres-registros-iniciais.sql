@@ -1,1 +1,0 @@
-INSERT INTO clientes (Descricao) VALUES ('Cliente A'), ('Cliente B'), ('Cliente C');
