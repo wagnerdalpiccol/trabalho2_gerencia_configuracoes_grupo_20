@@ -1,3 +1,9 @@
+
+DROP TABLE IF EXISTS pedidos CASCADE;
+DROP TABLE IF EXISTS produtos CASCADE;
+DROP TABLE IF EXISTS clientes CASCADE;
+
+
 CREATE TABLE IF NOT EXISTS clientes (
     cliente_id SERIAL PRIMARY KEY,
     nome VARCHAR(100) NOT NULL,
@@ -5,6 +11,7 @@ CREATE TABLE IF NOT EXISTS clientes (
     data_cadastro TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(20) NOT NULL
 );
+
 
 INSERT INTO clientes (nome, email, status) VALUES
 ('Ana Silva', 'ana@exemplo.com', 'Ativo'),
@@ -15,6 +22,8 @@ INSERT INTO clientes (nome, email, status) VALUES
 ('Felipe Lima', 'felipe@exemplo.com', 'Ativo'),
 ('Giovana Reis', 'giovana@exemplo.com', 'Pendente');
 
+
+
 CREATE TABLE IF NOT EXISTS produtos (
     produto_id SERIAL PRIMARY KEY,
     nome_produto VARCHAR(100) NOT NULL,
@@ -22,6 +31,7 @@ CREATE TABLE IF NOT EXISTS produtos (
     preco NUMERIC(10, 2) NOT NULL,
     estoque INTEGER NOT NULL
 );
+
 
 INSERT INTO produtos (nome_produto, categoria, preco, estoque) VALUES
 ('Monitor 27 Polegadas', 'Eletrônicos', 1250.00, 15),
@@ -32,13 +42,16 @@ INSERT INTO produtos (nome_produto, categoria, preco, estoque) VALUES
 ('Webcam HD', 'Eletrônicos', 150.00, 30),
 ('Fones Bluetooth', 'Acessórios', 450.00, 12);
 
+
+
 CREATE TABLE IF NOT EXISTS pedidos (
     pedido_id SERIAL PRIMARY KEY,
-    cliente_fk INTEGER REFERENCES clientes(cliente_id), -- Depende da tabela clientes
+    cliente_fk INTEGER REFERENCES clientes(cliente_id),
     data_pedido DATE NOT NULL,
     valor_total NUMERIC(10, 2) NOT NULL,
     metodo_pagamento VARCHAR(50)
 );
+
 
 INSERT INTO pedidos (cliente_fk, data_pedido, valor_total, metodo_pagamento) VALUES
 (1, '2025-10-01', 1339.90, 'Cartão'),
