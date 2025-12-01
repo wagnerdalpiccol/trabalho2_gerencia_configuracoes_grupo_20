@@ -84,8 +84,7 @@ jobs:
           SCHEMA_NAME="${{ env.TARGET_ENV }}"
           echo "Criando e selecionando o schema: $SCHEMA_NAME"
           
-          # CRÍTICO: Usa psql -c para executar comandos diretamente, evitando problemas com o sed.
-          # Cria o schema e o define como caminho de busca (search_path).
+          # CRÍTICO: Usa psql -c para executar comandos diretamente, forçando a criação do schema.
           psql "${{ env.DB_URL }}" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA IF NOT EXISTS \"$SCHEMA_NAME\"; SET search_path TO \"$SCHEMA_NAME\", public;"
           
           echo "Schema $SCHEMA_NAME criado/selecionado com sucesso."
@@ -95,16 +94,21 @@ jobs:
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
-          # O script V1 deve ser executado AGORA no schema selecionado no passo anterior.
-          MIGRATION_FILE="grupo20/src/main/resources/db/migration/V1__cria_tabela_cliente.sql"
+          # Caminho para o diretório de migração do Spring Boot:
+          MIGRATION_DIR="grupo20/src/main/resources/db/migration"
 
-          if [ -f "$MIGRATION_FILE" ]; then
-            echo "-> Executando migração: $MIGRATION_FILE"
-            # O comando psql executa o arquivo DENTRO do schema selecionado no passo anterior.
-            psql "${{ env.DB_URL }}" -f "$MIGRATION_FILE" -v ON_ERROR_STOP=1
+          if [ -d "$MIGRATION_DIR" ]; then
+            echo "Encontrando scripts SQL em $MIGRATION_DIR..."
           
-            echo "Migração do banco de dados concluída com sucesso para o ambiente ${{ env.TARGET_ENV }}."
+            # Loop que executa todos os arquivos *.sql na ordem.
+            find "$MIGRATION_DIR" -type f -name "*.sql" | sort | while read -r SQL_FILE; do
+              echo "-> Executando migração: $SQL_FILE"
+              # O psql executa o arquivo DENTRO do schema selecionado no passo anterior.
+              psql "${{ env.DB_URL }}" -f "$SQL_FILE" -v ON_ERROR_STOP=1
+            done
+          
+            echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
           else
-            echo "❌ ERRO: Arquivo de migração $MIGRATION_FILE não encontrado."
+            echo "❌ ERRO: Diretório de migração $MIGRATION_DIR não encontrado."
             exit 1
           fi
