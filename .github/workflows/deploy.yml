@@ -88,7 +88,7 @@ jobs:
         run: |
           echo "Limpando o ambiente DEV antes da migração..."
           # psql executa o script que contém o DROP TABLE IF EXISTS clientes CASCADE
-          psql "${{ env.DB_URL }}" -f setup/clean_dev_db.sql -v ON_ERROR_STOP=1
+          psql "${{ env.DB_URL }}" -f setup/setup_schema.sql -v ON_ERROR_STOP=1
           echo "Limpeza concluída."
 
       - name: 🔄 Executar Migrações do Banco de Dados
