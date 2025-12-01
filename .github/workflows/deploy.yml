@@ -3,17 +3,12 @@ run-name: Deploy em andamento para ${{ github.ref_name }} (Disparado por ${{ git
 
 # --- GATILHOS (TRIGGERS) ---
 on:
-  # 1. master/main: Sempre que houver push ou PR merged
   push:
     branches:
       - main
       - master
-
-  # 2. preprod: Agendado (diariamente às 10:00 UTC)
   schedule:
     - cron: '0 10 * * *'
-
-  # 3. preprod e dev: Disparo manual
   workflow_dispatch:
     inputs:
       target_environment:
@@ -32,6 +27,8 @@ jobs:
       - name: 🔍 Definir Variáveis de Ambiente e Branch Alvo
         id: set_env
         run: |
+          echo "HOST_SUPABASE=db.furkyzfwvzptwtbkoacl.supabase.co" >> $GITHUB_ENV
+          
           # 1. Triggers 'push' (master/main)
           if [[ "${{ github.event_name }}" == "push" && ("${{ github.ref_name }}" == "main" || "${{ github.ref_name }}" == "master") ]]; then
             echo "TARGET_ENV=prod" >> $GITHUB_ENV
@@ -80,35 +77,34 @@ jobs:
         run: |
           echo "Disparando deploy do Frontend para o ambiente ${{ env.TARGET_ENV }}..."
           curl -X POST -d {} "${{ env.DEPLOY_HOOK }}"
-          echo "Hook de Deploy enviado. Verifique o status no Netlify."
+          echo "Hook de Deploy enviado. Verifique o status no Vercel."
 
-      - name: 🗑️ CLEANUP Limpar Tabelas Antigas (Apenas DEV)
-        # ESTE PASSO SÓ RODA SE O TARGET_ENV FOR 'dev'
-        if: ${{ env.TARGET_ENV == 'dev' }}
+      - name: 🧱 INICIALIZAÇÃO Criar e Selecionar o Schema
         run: |
-          echo "Limpando o ambiente DEV antes da migração..."
-          # psql executa o script que contém o DROP TABLE IF EXISTS clientes CASCADE
-          psql "${{ env.DB_URL }}" -f setup/setup_schema.sql -v ON_ERROR_STOP=1
-          echo "Limpeza concluída."
+          SCHEMA_NAME="${{ env.TARGET_ENV }}"
+          echo "Criando e selecionando o schema: $SCHEMA_NAME"
+          
+          # CRÍTICO: Usa psql -c para executar comandos diretamente, evitando problemas com o sed.
+          # Cria o schema e o define como caminho de busca (search_path).
+          psql "${{ env.DB_URL }}" -v ON_ERROR_STOP=1 -c "CREATE SCHEMA IF NOT EXISTS \"$SCHEMA_NAME\"; SET search_path TO \"$SCHEMA_NAME\", public;"
+          
+          echo "Schema $SCHEMA_NAME criado/selecionado com sucesso."
+
 
       - name: 🔄 Executar Migrações do Banco de Dados
         run: |
           echo "Iniciando migrações para o BD ${{ env.TARGET_ENV }}..."
           
-          MIGRATION_DIR="grupo20/src/main/resources/db/migration"
+          # O script V1 deve ser executado AGORA no schema selecionado no passo anterior.
+          MIGRATION_FILE="grupo20/src/main/resources/db/migration/V1__cria_tabela_cliente.sql"
+
+          if [ -f "$MIGRATION_FILE" ]; then
+            echo "-> Executando migração: $MIGRATION_FILE"
+            # O comando psql executa o arquivo DENTRO do schema selecionado no passo anterior.
+            psql "${{ env.DB_URL }}" -f "$MIGRATION_FILE" -v ON_ERROR_STOP=1
           
-          if [ -d "$MIGRATION_DIR" ]; then
-            echo "Encontrando scripts SQL em $MIGRATION_DIR..."
-          
-            # Loop que encontra todos os arquivos *.sql e os executa em ordem alfabética
-            find "$MIGRATION_DIR" -type f -name "*.sql" | sort | while read -r SQL_FILE; do
-              echo "-> Executando migração: $SQL_FILE"
-              # psql executa o arquivo
-              psql "${{ env.DB_URL }}" -f "$SQL_FILE" -v ON_ERROR_STOP=1
-            done
-          
-            echo "Migrações do banco de dados concluídas com sucesso para o ambiente ${{ env.TARGET_ENV }}."
+            echo "Migração do banco de dados concluída com sucesso para o ambiente ${{ env.TARGET_ENV }}."
           else
-            echo "❌ ERRO: Diretório de migração $MIGRATION_DIR não encontrado."
+            echo "❌ ERRO: Arquivo de migração $MIGRATION_FILE não encontrado."
             exit 1
           fi
